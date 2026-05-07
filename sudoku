@@ -12,6 +12,7 @@
 #   ./sudoku hard
 #
 ##############################################
+VERSION=1.1
 set -u
 
 #
@@ -26,7 +27,7 @@ EXPERT=24
 # Color Settings
 #
 BORDER='\033[34m'
-CELL='\033[34m'
+CELL='\033[90m'
 NUM_FG='\033[32m'
 LEGEND='\033[33m'
 YELLOW_BG='\033[43m'
