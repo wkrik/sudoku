@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+
+##############################################
+#
+# sudoku - Play Sudoku from a Linux CLI Shell
+#
+# By Kirk Waingrow (w/help from ChatGPT)
+#
+# Usage:
+#   ./sudoku easy
+#   ./sudoku medium
+#   ./sudoku hard
+#
+##############################################
+set -u
+
+#
+# Difficulty Level = Number exposed cells
+#
+EASY=42
+MEDIUM=34
+HARD=30
+EXPERT=24
+
+#
+# Color Settings
+#
+BORDER='\033[34m'
+CELL='\033[34m'
+NUM_FG='\033[32m'
+LEGEND='\033[33m'
+YELLOW_BG='\033[43m'
+FIND_BG='\033[46m'
+COMPLETE_BG='\033[42m'
+RESET='\033[0m'
+
+
+difficulty="${1:-easy}"
+
+case "$difficulty" in
+  e|easy)   clues=$EASY ;;
+  m|medium) clues=$MEDIUM ;;
+  h|hard)   clues=$HARD ;;
+  x|expert) clues=$EXPERT ;;
+  *)
+    echo "Usage: $0 {easy|medium|hard}"
+    exit 1
+    ;;
+esac
+
+pattern() {
+  local r="$1" c="$2"
+  echo $(( (r * 3 + r / 3 + c) % 9 + 1 ))
+}
+
+shuffle_list() {
+  awk 'BEGIN{srand()}
+  {a[NR]=$0}
+  END{
+    for(i=1;i<=NR;i++){
+      j=int(rand()*NR)+1
+      t=a[i]; a[i]=a[j]; a[j]=t
+    }
+    for(i=1;i<=NR;i++) print a[i]
+  }'
+}
+
+build_rows_or_cols() {
+  local bands band part
+  local out=()
+
+  mapfile -t bands < <(printf "0\n1\n2\n" | shuffle_list)
+
+  for band in "${bands[@]}"; do
+    mapfile -t part < <(
+      printf "%s\n%s\n%s\n" $((band*3)) $((band*3+1)) $((band*3+2)) | shuffle_list
+    )
+    out+=("${part[@]}")
+  done
+
+  printf "%s\n" "${out[@]}"
+}
+
+mapfile -t rows < <(build_rows_or_cols)
+mapfile -t cols < <(build_rows_or_cols)
+mapfile -t nums < <(printf "1\n2\n3\n4\n5\n6\n7\n8\n9\n" | shuffle_list)
+
+solution=()
+for r in "${rows[@]}"; do
+  for c in "${cols[@]}"; do
+    val=$(pattern "$r" "$c")
+    solution+=("${nums[$((val-1))]}")
+  done
+done
+
+puzzle=("${solution[@]}")
+
+remove_count=$((81 - clues))
+removed=0
+while [ "$removed" -lt "$remove_count" ]; do
+  idx=$((RANDOM % 81))
+  if [ "${puzzle[$idx]}" != "." ]; then
+    puzzle[$idx]="."
+    removed=$((removed + 1))
+  fi
+done
+
+fixed=()
+for i in "${!puzzle[@]}"; do
+  if [ "${puzzle[$i]}" = "." ]; then
+    fixed+=(0)
+  else
+    fixed+=(1)
+  fi
+done
+
+message=""
+hint_idx=-1
+find_num=""
+find_complete=0
+
+count_find_num() {
+  local val count=0 i
+  val="$1"
+
+  [ -z "$val" ] && {
+    echo 0
+    return
+  }
+
+  for i in "${!puzzle[@]}"; do
+    if [ "${puzzle[$i]}" = "$val" ]; then
+      count=$((count + 1))
+    fi
+  done
+
+  echo "$count"
+}
+
+update_find_status() {
+  local count
+
+  if [ -z "$find_num" ]; then
+    find_complete=0
+    return
+  fi
+
+  count=$(count_find_num "$find_num")
+  if [ "$count" -eq 9 ]; then
+    find_complete=1
+  else
+    find_complete=0
+  fi
+}
+
+print_board() {
+  local -n board_ref=$1
+  local r c idx val
+
+  printf "${LEGEND}    1   2   3   4   5   6   7   8   9\n"
+  printf "  ${BORDER}┏━━━┯━━━┯━━━┳━━━┯━━━┯━━━┳━━━┯━━━┯━━━┓${RESET}\n"
+
+  for ((r=0; r<9; r++)); do
+    # Row legend (yellow)
+    printf "${LEGEND}%d${RESET} ${BORDER}┃${RESET}" $((r+1))
+
+    for ((c=0; c<9; c++)); do
+      idx=$((r*9+c))
+      val="${board_ref[$idx]}"
+      [ "$val" = "." ] && val=" "
+
+      if [ "$idx" -eq "$hint_idx" ]; then
+        printf "${YELLOW_BG} %s ${RESET}" "$val"
+      elif [ -n "$find_num" ] && [ "$val" = "$find_num" ]; then
+        if [ "$find_complete" -eq 1 ]; then
+          printf "${COMPLETE_BG} %s ${RESET}" "$val"
+        else
+          printf "${FIND_BG} %s ${RESET}" "$val"
+        fi
+      else
+        printf "${NUM_FG} %s ${RESET}" "$val"
+      fi
+
+      if [ $c -eq 8 ]; then
+        printf "${BORDER}┃${RESET}"
+      elif [ $(((c+1)%3)) -eq 0 ]; then
+        printf "${BORDER}┃${RESET}"
+      else
+        printf "${CELL}│${RESET}"
+      fi
+    done
+    printf "\n"
+
+    if [ $r -eq 8 ]; then
+      printf "  ${BORDER}┗━━━┷━━━┷━━━┻━━━┷━━━┷━━━┻━━━┷━━━┷━━━┛${RESET}\n"
+    elif [ $(((r+1)%3)) -eq 0 ]; then
+      printf "  ${BORDER}┣━━━┿━━━┿━━━╋━━━┿━━━┿━━━╋━━━┿━━━┿━━━┫${RESET}\n"
+    else
+      printf "  ${BORDER}┠${RESET}${CELL}───┼───┼───${RESET}${BORDER}╂${RESET}${CELL}───┼───┼───${RESET}${BORDER}╂${RESET}${CELL}───┼───┼───${RESET}${BORDER}┨${RESET}\n"
+    fi
+  done
+}
+
+is_solved() {
+  local i
+  for i in "${!puzzle[@]}"; do
+    [ "${puzzle[$i]}" != "${solution[$i]}" ] && return 1
+  done
+  return 0
+}
+
+give_hint() {
+  local empty=()
+  local i pick idx
+
+  for i in "${!puzzle[@]}"; do
+    [ "${puzzle[$i]}" = "." ] && empty+=("$i")
+  done
+
+  [ "${#empty[@]}" -eq 0 ] && { message="No empty cells."; return; }
+
+  pick=$((RANDOM % ${#empty[@]}))
+  idx="${empty[$pick]}"
+
+  puzzle[$idx]="${solution[$idx]}"
+  hint_idx="$idx"
+  update_find_status
+  message="Hint placed at row $((idx/9+1)), col $((idx%9+1))."
+}
+
+clear_nonfixed() {
+  local i
+  for i in "${!puzzle[@]}"; do
+    [ "${fixed[$i]}" -eq 0 ] && puzzle[$i]="."
+  done
+  hint_idx=-1
+  update_find_status
+  message="Cleared your entries."
+}
+
+while :; do
+  clear 2>/dev/null || printf '\033c'
+
+  echo "Sudoku ($difficulty)"
+  echo
+  print_board puzzle
+  echo
+
+  [ -n "$message" ] && echo "$message" && echo && message=""
+
+  if is_solved; then
+    echo "You solved it."
+    exit 0
+  fi
+
+  echo "Enter: row col num (example: 2 3 9)"
+  echo "Commands: h=hint  c=clear  s=solution  q=quit  f N=find number"
+  printf "> "
+  read -r a b c
+
+  case "${a:-}" in
+    q)
+      exit 0
+      ;;
+    s)
+      echo
+      print_board solution
+      exit 0
+      ;;
+    h)
+      give_hint
+      continue
+      ;;
+    c)
+      clear_nonfixed
+      continue
+      ;;
+    f)
+      hint_idx=-1
+      if [[ "${b:-}" =~ ^[0-9]$ ]]; then
+        if [ "$b" = "0" ]; then
+          find_num=""
+          find_complete=0
+          message="Number highlighting cleared."
+        else
+          find_num="$b"
+          update_find_status
+          if [ "$find_complete" -eq 1 ]; then
+            message="All 9 current $find_num values are highlighted in green."
+          else
+            message="Highlighting all current $find_num values on the board."
+          fi
+        fi
+      else
+        message="Use: f 1 through f 9, or f 0 to clear."
+      fi
+      continue
+      ;;
+  esac
+
+  [[ ! "${a:-}" =~ ^[1-9]$ || ! "${b:-}" =~ ^[1-9]$ || ! "${c:-}" =~ ^[0-9]$ ]] && {
+    hint_idx=-1
+    message="Invalid input."
+    continue
+  }
+
+  row=$((a-1))
+  col=$((b-1))
+  idx=$((row*9+col))
+
+  [ "${fixed[$idx]}" -eq 1 ] && {
+    hint_idx=-1
+    message="Cell is fixed."
+    continue
+  }
+
+  if [ "$c" -eq 0 ]; then
+    puzzle[$idx]="."
+    hint_idx=-1
+    update_find_status
+    message="Cleared row $a, col $b."
+    continue
+  fi
+
+  if [ "${solution[$idx]}" = "$c" ]; then
+    puzzle[$idx]="$c"
+    hint_idx=-1
+    update_find_status
+    message="Correct."
+  else
+    hint_idx=-1
+    message="Incorrect."
+  fi
+done
